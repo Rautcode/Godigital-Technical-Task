@@ -48,7 +48,7 @@ pipeline {
         stage('Login to AWS ECR') {
             steps {
                 script {
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
                         echo "Logging into AWS ECR..."
                         powershell '''
                         $PASSWORD = aws ecr get-login-password --region ap-south-1
