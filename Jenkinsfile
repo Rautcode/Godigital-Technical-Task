@@ -49,17 +49,18 @@ pipeline {
             }
         }
 
-        sstage('Convert OCI to Docker V2') {
-            steps {
-                script {
-                    sh '''
-                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                    -v "$(pwd -W | sed 's/\\/\//g')":/workspace quay.io/skopeo/stable:latest \
-                    copy --format v2s2 oci-archive:/workspace/oci-image.tar docker-daemon:my-docker-image:latest
-                    '''
-                    }
-                }
-        }
+       stage('Convert OCI to Docker V2') {
+           steps {
+               script {
+                   sh '''
+                   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                   -v "$WORKSPACE":/workspace quay.io/skopeo/stable:latest \
+                   copy --format v2s2 oci-archive:/workspace/oci-image.tar docker-daemon:my-docker-image:latest
+                   '''
+                   }
+               }
+           }
+
         
         stage('Push Docker Image to AWS ECR') {
             steps {
