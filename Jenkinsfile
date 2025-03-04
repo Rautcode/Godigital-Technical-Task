@@ -51,13 +51,13 @@ pipeline {
 
         stage('Convert OCI to Docker V2') {
             steps {
-                sh '''
-                # Convert OCI to Docker V2 Schema 2
-                skopeo copy oci-archive:oci-image.tar docker-archive:docker-image.tar
-                docker load < docker-image.tar
-                '''
+                script {
+                    sh '''
+                    wsl skopeo copy oci-archive:oci-image.tar docker-archive:docker-image.tar
+                    '''
+                    }
+                }
             }
-        }
         
         stage('Push Docker Image to AWS ECR') {
             steps {
