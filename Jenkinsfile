@@ -49,17 +49,16 @@ pipeline {
             }
         }
 
-        stage('Convert OCI to Docker V2') {
+        sstage('Convert OCI to Docker V2') {
             steps {
                 script {
                     sh '''
-                    # Run Skopeo inside a Docker container to convert OCI to Docker V2 format
                     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                        -v "$(pwd):/workspace" quay.io/skopeo/stable:latest \
-                        copy --format v2s2 oci-archive:/workspace/oci-image.tar docker-daemon:my-docker-image:latest
+                    -v "$(pwd -W | sed 's/\\/\//g')":/workspace quay.io/skopeo/stable:latest \
+                    copy --format v2s2 oci-archive:/workspace/oci-image.tar docker-daemon:my-docker-image:latest
                     '''
+                    }
                 }
-            }
         }
         
         stage('Push Docker Image to AWS ECR') {
