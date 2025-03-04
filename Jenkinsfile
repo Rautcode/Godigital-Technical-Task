@@ -32,7 +32,7 @@ pipeline {
                 powershell '''
                 terraform apply -auto-approve tfplan
 
-                # Store terraform outputs as environment variables
+                // Store terraform outputs as environment variables
                 $env:ECR_REPOSITORY_URL = terraform output -raw ecr_repository_url
                 $env:LAMBDA_FUNCTION_NAME = terraform output -raw lambda_function_name
                 '''
@@ -42,13 +42,13 @@ pipeline {
         stage('Build and Push Docker Image') {
             steps {
                 powershell '''
-                # Login to ECR
+                // Login to ECR
                 aws ecr get-login-password --region ${env:AWS_REGION} | docker login --username AWS --password-stdin $env:ECR_REPOSITORY_URL
 
-                # Build Docker image
+                // Build Docker image
                 docker build -t "$env:ECR_REPOSITORY_URL`:latest" .
 
-                # Push Docker image to ECR
+                // Push Docker image to ECR
                 docker push "$env:ECR_REPOSITORY_URL`:latest"
                 '''
             }
@@ -57,7 +57,7 @@ pipeline {
         stage('Update Lambda Function') {
             steps {
                 powershell '''
-                # Update Lambda function with new container image
+                // Update Lambda function with new container image
                 aws lambda update-function-code `
                     --region ${env:AWS_REGION} `
                     --function-name $env:LAMBDA_FUNCTION_NAME `
@@ -69,7 +69,7 @@ pipeline {
         stage('Test Lambda Function') {
             steps {
                 powershell '''
-                # Create test event file
+                // Create test event file
                 @"
                 {
                     "s3_bucket": "$(terraform output -raw s3_bucket_name)",
@@ -77,7 +77,7 @@ pipeline {
                 }
                 "@ | Out-File -FilePath test-event.json -Encoding utf8
                 
-                # Invoke Lambda function with test event
+                // Invoke Lambda function with test event
                 aws lambda invoke `
                     --region ${env:AWS_REGION} `
                     --function-name $env:LAMBDA_FUNCTION_NAME `
@@ -85,7 +85,7 @@ pipeline {
                     --cli-binary-format raw-in-base64-out `
                     lambda-response.json
                 
-                # Print the Lambda response
+                // Print the Lambda response
                 Get-Content lambda-response.json
                 '''
             }
@@ -94,7 +94,7 @@ pipeline {
     
     post {
         always {
-            # Clean up
+            // Clean up
             powershell 'Remove-Item -Force test-event.json, lambda-response.json -ErrorAction Ignore'
         }
         success {
