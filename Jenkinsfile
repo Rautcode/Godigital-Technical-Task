@@ -27,10 +27,18 @@ pipeline {
             steps {
                 script {
                     echo "Building Docker image with Docker v2 format..."
-                    powershell "docker build --format=docker -t ${ECR_REPO}:latest ."
+                    powershell '''
+                    # Disable BuildKit to prevent OCI format
+                    $env:DOCKER_BUILDKIT=0
+                    $env:DOCKER_CLI_EXPERIMENTAL="enabled"
+                    # Build Docker image using the traditional v2 format
+                    docker build --platform linux/amd64 -t ${ECR_REPO}:latest .
+                    # Tag the image before pushing to ECR
+                    docker tag ${ECR_REPO}:latest ${ECR_URI}:latest
+                    '''
+                    }
                 }
             }
-        }
 
         stage('Login to AWS ECR') {
             steps {
