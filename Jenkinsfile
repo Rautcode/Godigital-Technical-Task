@@ -26,24 +26,25 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    echo "Building Docker image with Docker v2 format..."
-                    // Ensure ECR_REPO and ECR_URI are correctly set
+                    echo "Building Docker image..."
+                    // Validate required environment variables
                     if (!env.ECR_REPO || !env.ECR_URI) {
-                        error "ECR_REPO or ECR_URI is not defined! Check your environment variables."
+                        error "ECR_REPO or ECR_URI is not defined. Ensure environment variables are set."
                         }
                     powershell '''
-                    # Remove DOCKER_BUILDKIT=0 (BuildKit is required in newer Docker versions)
-                    $env:DOCKER_BUILDKIT=1
-                    # Debugging: Show Docker version and verify variables
-                    docker --version
-                    echo "ECR_REPO=${ECR_REPO}, ECR_URI=${ECR_URI}"
-                    # Build Docker image with Docker v2 format
-                    docker build --platform linux/amd64 -t ${ECR_URI}:latest .
+                    # Enable BuildKit for improved performance and compatibility
+                    $env:DOCKER_BUILDKIT="1"
+                    # Build Docker image with platform specification
+                    docker build --platform linux/amd64 -t "$env:ECR_URI`:latest" .
+                    # Verify the build was successful
+                    if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Docker build failed."
+                    exit 1
+                    }
                     '''
                     }
                 }
             }
-
         stage('Login to AWS ECR') {
             steps {
                 script {
