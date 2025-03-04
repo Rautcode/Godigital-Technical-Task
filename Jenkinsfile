@@ -35,20 +35,41 @@ pipeline {
                 script {
                     env.ECR_REPOSITORY_URL = sh(script: 'terraform output -raw ecr_repository_url', returnStdout: true).trim()
                     env.LAMBDA_FUNCTION_NAME = sh(script: 'terraform output -raw lambda_function_name', returnStdout: true).trim()
+                    env.S3_BUCKET_NAME = sh(script: 'terraform output -raw s3_bucket_name', returnStdout: true).trim()
                 }
             }
         }
         
-        stage('Build and Push Docker Image') {
+        stage('Build OCI Image') {
             steps {
                 sh '''
+                # Build Docker image in OCI format
+                docker buildx build --output type=oci,dest=oci-image.tar .
+                '''
+            }
+        }
+
+        stage('Convert OCI to Docker V2') {
+            steps {
+                sh '''
+                # Convert OCI to Docker V2 Schema 2
+                skopeo copy oci-archive:oci-image.tar docker-archive:docker-image.tar
+                docker load < docker-image.tar
+                '''
+            }
+        }
+        
+        stage('Push Docker Image to AWS ECR') {
+            steps {
+                sh '''
+                # Extract the repository name from the URL
+                REPO_NAME=$(echo ${ECR_REPOSITORY_URL} | awk -F'/' '{print $NF}')
+                
                 # Login to ECR
                 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
                 
-                # Build Docker image
-                docker build -t ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG} .
-                
-                # Push Docker image to ECR
+                # Tag and push Docker image to ECR
+                docker tag ${REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
@@ -72,7 +93,7 @@ pipeline {
                 # Create test event file
                 cat > test-event.json << EOL
                 {
-                    "s3_bucket": "$(terraform output -raw s3_bucket_name)",
+                    "s3_bucket": "${S3_BUCKET_NAME}",
                     "s3_key": "test-data.csv"
                 }
                 EOL
@@ -94,14 +115,13 @@ pipeline {
     
     post {
         always {
-            // Clean up
             sh 'rm -f test-event.json lambda-response.json'
         }
         success {
-            echo 'Pipeline completed successfully!'
+            echo '✅ Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed!'
+            echo '❌ Pipeline failed! Check logs.'
         }
     }
 }
