@@ -17,76 +17,77 @@ pipeline {
         
         stage('Terraform Init') {
             steps {
-                sh 'terraform init'
+                powershell 'terraform init'
             }
         }
         
         stage('Terraform Plan') {
             steps {
-                sh 'terraform plan -out=tfplan'
+                powershell 'terraform plan -out=tfplan'
             }
         }
         
         stage('Terraform Apply') {
             steps {
-                sh 'terraform apply -auto-approve tfplan'
+                powershell 'terraform apply -auto-approve tfplan'
                 
-                // Store terraform outputs as environment variables
+                // Store Terraform outputs as environment variables
                 script {
-                    env.ECR_REPOSITORY_URL = sh(script: 'terraform output -raw ecr_repository_url', returnStdout: true).trim()
-                    env.LAMBDA_FUNCTION_NAME = sh(script: 'terraform output -raw lambda_function_name', returnStdout: true).trim()
+                    env.ECR_REPOSITORY_URL = powershell(returnStdout: true, script: 'terraform output -raw ecr_repository_url').trim()
+                    env.LAMBDA_FUNCTION_NAME = powershell(returnStdout: true, script: 'terraform output -raw lambda_function_name').trim()
                 }
             }
         }
         
         stage('Build and Push Docker Image') {
             steps {
-                sh '''
-                # Login to ECR
-                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
-                
-                # Build Docker image
-                docker build -t ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG} .
-                
-                # Push Docker image to ECR
-                docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+                bat '''
+                REM Login to AWS ECR
+                for /f "tokens=*" %%i in ('aws ecr get-login-password --region %AWS_REGION%') do set ECR_LOGIN_PASSWORD=%%i
+                echo %ECR_LOGIN_PASSWORD% | docker login --username AWS --password-stdin %ECR_REPOSITORY_URL%
+
+                REM Build Docker image using Docker v2 format (not OCI)
+                docker build --format=docker -t %ECR_REPOSITORY_URL%:%DOCKER_IMAGE_TAG% .
+
+                REM Push Docker image (Ensure v2 format)
+                docker push %ECR_REPOSITORY_URL%:%DOCKER_IMAGE_TAG%
                 '''
             }
         }
         
         stage('Update Lambda Function') {
             steps {
-                sh '''
-                # Update Lambda function with new container image
-                aws lambda update-function-code \
-                    --region ${AWS_REGION} \
-                    --function-name ${LAMBDA_FUNCTION_NAME} \
-                    --image-uri ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+                powershell '''
+                aws lambda update-function-code `
+                    --region ${env.AWS_REGION} `
+                    --function-name ${env.LAMBDA_FUNCTION_NAME} `
+                    --image-uri ${env.ECR_REPOSITORY_URL}:${env.DOCKER_IMAGE_TAG}
                 '''
             }
         }
         
         stage('Test Lambda Function') {
             steps {
-                sh '''
-                # Create test event file
-                cat > test-event.json << EOL
+                powershell '''
+                # Create test event JSON
+                $testEvent = @"
                 {
                     "s3_bucket": "$(terraform output -raw s3_bucket_name)",
                     "s3_key": "test-data.csv"
                 }
-                EOL
+                "@
+                $testEvent | Out-File -FilePath test-event.json -Encoding utf8
                 
-                # Invoke Lambda function with test event
-                aws lambda invoke \
-                    --region ${AWS_REGION} \
-                    --function-name ${LAMBDA_FUNCTION_NAME} \
-                    --payload file://test-event.json \
-                    --cli-binary-format raw-in-base64-out \
+                # Invoke Lambda function
+                aws lambda invoke `
+                    --region ${env.AWS_REGION} `
+                    --function-name ${env.LAMBDA_FUNCTION_NAME} `
+                    --payload file://test-event.json `
+                    --cli-binary-format raw-in-base64-out `
                     lambda-response.json
                 
                 # Print the Lambda response
-                cat lambda-response.json
+                Get-Content lambda-response.json
                 '''
             }
         }
@@ -94,8 +95,7 @@ pipeline {
     
     post {
         always {
-            // Clean up
-            sh 'rm -f test-event.json lambda-response.json'
+            powershell 'Remove-Item -Force test-event.json, lambda-response.json -ErrorAction Ignore'
         }
         success {
             echo 'Pipeline completed successfully!'
