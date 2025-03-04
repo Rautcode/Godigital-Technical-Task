@@ -1,10 +1,15 @@
 provider "aws" {
   region = var.aws_region
 }
+resource "random_string" "suffix" {
+  length  = 6
+  special = false
+  upper   = false
+}
 
-# S3 bucket for data storage
+# S3 bucket for data storage with unique name
 resource "aws_s3_bucket" "data_bucket" {
-  bucket = var.s3_bucket_name
+  bucket = "${var.s3_bucket_name}-${random_string.suffix.result}"
 }
 
 resource "aws_s3_bucket_ownership_controls" "data_bucket_ownership" {
@@ -90,7 +95,7 @@ resource "aws_db_instance" "postgres" {
   allocated_storage    = 20
   storage_type         = "gp2"
   engine               = "postgres"
-  engine_version       = "14.6"
+  engine_version       = "14.17"
   instance_class       = "db.t3.micro"
   db_name              = var.rds_db_name
   username             = var.rds_username
