@@ -17,76 +17,76 @@ pipeline {
         
         stage('Terraform Init') {
             steps {
-                powershell 'terraform init'
+                sh 'terraform init'
             }
         }
         
         stage('Terraform Plan') {
             steps {
-                powershell 'terraform plan -out=tfplan'
+                sh 'terraform plan -out=tfplan'
             }
         }
         
         stage('Terraform Apply') {
             steps {
-                powershell '''
-                terraform apply -auto-approve tfplan
-
+                sh 'terraform apply -auto-approve tfplan'
+                
                 // Store terraform outputs as environment variables
-                $env:ECR_REPOSITORY_URL = terraform output -raw ecr_repository_url
-                $env:LAMBDA_FUNCTION_NAME = terraform output -raw lambda_function_name
-                '''
+                script {
+                    env.ECR_REPOSITORY_URL = sh(script: 'terraform output -raw ecr_repository_url', returnStdout: true).trim()
+                    env.LAMBDA_FUNCTION_NAME = sh(script: 'terraform output -raw lambda_function_name', returnStdout: true).trim()
+                }
             }
         }
         
         stage('Build and Push Docker Image') {
             steps {
-                powershell '''
-                // Login to ECR
-                aws ecr get-login-password --region ${env:AWS_REGION} | docker login --username AWS --password-stdin $env:ECR_REPOSITORY_URL
-
-                // Build Docker image
-                docker build -t "$env:ECR_REPOSITORY_URL`:latest" .
-
-                // Push Docker image to ECR
-                docker push "$env:ECR_REPOSITORY_URL`:latest"
+                sh '''
+                # Login to ECR
+                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
+                
+                # Build Docker image
+                docker build -t ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG} .
+                
+                # Push Docker image to ECR
+                docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
         }
         
         stage('Update Lambda Function') {
             steps {
-                powershell '''
-                // Update Lambda function with new container image
-                aws lambda update-function-code `
-                    --region ${env:AWS_REGION} `
-                    --function-name $env:LAMBDA_FUNCTION_NAME `
-                    --image-uri "$env:ECR_REPOSITORY_URL`:latest"
+                sh '''
+                # Update Lambda function with new container image
+                aws lambda update-function-code \
+                    --region ${AWS_REGION} \
+                    --function-name ${LAMBDA_FUNCTION_NAME} \
+                    --image-uri ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
         }
         
         stage('Test Lambda Function') {
             steps {
-                powershell '''
-                // Create test event file
-                @"
+                sh '''
+                # Create test event file
+                cat > test-event.json << EOL
                 {
                     "s3_bucket": "$(terraform output -raw s3_bucket_name)",
                     "s3_key": "test-data.csv"
                 }
-                "@ | Out-File -FilePath test-event.json -Encoding utf8
+                EOL
                 
-                // Invoke Lambda function with test event
-                aws lambda invoke `
-                    --region ${env:AWS_REGION} `
-                    --function-name $env:LAMBDA_FUNCTION_NAME `
-                    --payload file://test-event.json `
-                    --cli-binary-format raw-in-base64-out `
+                # Invoke Lambda function with test event
+                aws lambda invoke \
+                    --region ${AWS_REGION} \
+                    --function-name ${LAMBDA_FUNCTION_NAME} \
+                    --payload file://test-event.json \
+                    --cli-binary-format raw-in-base64-out \
                     lambda-response.json
                 
-                // Print the Lambda response
-                Get-Content lambda-response.json
+                # Print the Lambda response
+                cat lambda-response.json
                 '''
             }
         }
@@ -95,7 +95,7 @@ pipeline {
     post {
         always {
             // Clean up
-            powershell 'Remove-Item -Force test-event.json, lambda-response.json -ErrorAction Ignore'
+            sh 'rm -f test-event.json lambda-response.json'
         }
         success {
             echo 'Pipeline completed successfully!'
