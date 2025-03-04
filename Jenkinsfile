@@ -26,8 +26,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    echo "Building Docker image..."
-                    powershell "docker build -t ${ECR_REPO}:latest ."
+                    echo "Building Docker image with Docker v2 format..."
+                    powershell "docker build --format=docker -t ${ECR_REPO}:latest ."
                 }
             }
         }
