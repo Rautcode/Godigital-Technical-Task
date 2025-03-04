@@ -6,6 +6,10 @@ pipeline {
         ECR_REPO_NAME = 'data-pipeline-repo'
         DOCKER_IMAGE_TAG = 'latest'
         TF_VAR_rds_password = credentials('rds-password')
+
+        // AWS credentials for authentication
+        AWS_ACCESS_KEY_ID = credentials('aws-access-key')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-key')
     }
     
     stages {
@@ -17,19 +21,32 @@ pipeline {
         
         stage('Terraform Init') {
             steps {
-                powershell 'terraform init'
+                powershell '''
+                $env:AWS_ACCESS_KEY_ID = "${env:AWS_ACCESS_KEY_ID}"
+                $env:AWS_SECRET_ACCESS_KEY = "${env:AWS_SECRET_ACCESS_KEY}"
+
+                terraform init
+                '''
             }
         }
         
         stage('Terraform Plan') {
             steps {
-                powershell 'terraform plan -out=tfplan'
+                powershell '''
+                $env:AWS_ACCESS_KEY_ID = "${env:AWS_ACCESS_KEY_ID}"
+                $env:AWS_SECRET_ACCESS_KEY = "${env:AWS_SECRET_ACCESS_KEY}"
+
+                terraform plan -out=tfplan
+                '''
             }
         }
         
         stage('Terraform Apply') {
             steps {
                 powershell '''
+                $env:AWS_ACCESS_KEY_ID = "${env:AWS_ACCESS_KEY_ID}"
+                $env:AWS_SECRET_ACCESS_KEY = "${env:AWS_SECRET_ACCESS_KEY}"
+
                 terraform apply -auto-approve tfplan
                 
                 # Store Terraform outputs as environment variables
@@ -42,14 +59,22 @@ pipeline {
         stage('Build and Push Docker Image') {
             steps {
                 powershell '''
+                # Set AWS credentials
+                $env:AWS_ACCESS_KEY_ID = "${env:AWS_ACCESS_KEY_ID}"
+                $env:AWS_SECRET_ACCESS_KEY = "${env:AWS_SECRET_ACCESS_KEY}"
+
                 # Login to AWS ECR
                 aws ecr get-login-password --region ${env:AWS_REGION} | docker login --username AWS --password-stdin $env:ECR_REPOSITORY_URL
 
                 # Build Docker image (Force Docker v2, Avoid OCI Format)
-                docker build --platform linux/amd64 -t "$env:ECR_REPOSITORY_URL`:latest" .
+                docker build --platform linux/amd64 --tag "$env:ECR_REPOSITORY_URL`:latest" .
 
                 # Verify image format before pushing
-                docker inspect "$env:ECR_REPOSITORY_URL`:latest" | ConvertFrom-Json | Select-Object -ExpandProperty Config | Select-Object -ExpandProperty MediaType
+                $imageFormat = docker inspect "$env:ECR_REPOSITORY_URL`:latest" | ConvertFrom-Json | Select-Object -ExpandProperty Config | Select-Object -ExpandProperty MediaType
+                if ($imageFormat -eq "application/vnd.oci.image.manifest.v1+json") {
+                    Write-Host "❌ ERROR: Docker image is in OCI format! Aborting."
+                    exit 1
+                }
 
                 # Push Docker image to ECR
                 docker push "$env:ECR_REPOSITORY_URL`:latest"
@@ -60,6 +85,10 @@ pipeline {
         stage('Update Lambda Function') {
             steps {
                 powershell '''
+                # Set AWS credentials
+                $env:AWS_ACCESS_KEY_ID = "${env:AWS_ACCESS_KEY_ID}"
+                $env:AWS_SECRET_ACCESS_KEY = "${env:AWS_SECRET_ACCESS_KEY}"
+
                 # Update Lambda function with new container image
                 aws lambda update-function-code `
                     --region ${env:AWS_REGION} `
@@ -108,4 +137,3 @@ pipeline {
         }
     }
 }
-
