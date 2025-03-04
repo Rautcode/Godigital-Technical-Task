@@ -1,0 +1,6 @@
+boto3==1.26.135
+pandas==2.0.1
+sqlalchemy==2.0.15
+psycopg2-binary==2.9.6
+pyarrow==12.0.0
+awswrangler==3.0.0
