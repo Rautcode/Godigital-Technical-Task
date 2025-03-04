@@ -1,100 +1,107 @@
 pipeline {
     agent any
-
+    
     environment {
-        AWS_ACCOUNT_ID = '982534379850'       
-        AWS_REGION = 'ap-south-1'              
-        ECR_REPO = 'my-python-app-lambda'     
-        LAMBDA_FUNCTION = 'my-python-app'     
-        ECR_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+        AWS_REGION = 'us-east-1'
+        ECR_REPO_NAME = 'data-pipeline-repo'
+        DOCKER_IMAGE_TAG = 'latest'
+        TF_VAR_rds_password = credentials('rds-password')
     }
-
+    
     stages {
-        stage('Clone Repo') {
+        stage('Checkout') {
             steps {
+                checkout scm
+            }
+        }
+        
+        stage('Terraform Init') {
+            steps {
+                sh 'terraform init'
+            }
+        }
+        
+        stage('Terraform Plan') {
+            steps {
+                sh 'terraform plan -out=tfplan'
+            }
+        }
+        
+        stage('Terraform Apply') {
+            steps {
+                sh 'terraform apply -auto-approve tfplan'
+                
+                // Store terraform outputs as environment variables
                 script {
-                    echo "Cloning repository..."
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: 'refs/heads/main']],  // Force use of main branch
-                        userRemoteConfigs: [[url: 'https://github.com/Rautcode/aws-devops-task.git']]
-                    ])
+                    env.ECR_REPOSITORY_URL = sh(script: 'terraform output -raw ecr_repository_url', returnStdout: true).trim()
+                    env.LAMBDA_FUNCTION_NAME = sh(script: 'terraform output -raw lambda_function_name', returnStdout: true).trim()
                 }
             }
         }
-
-        stage('Build Docker Image') {
+        
+        stage('Build and Push Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image..."
-                    // Validate required environment variables
-                    if (!env.ECR_REPO || !env.ECR_URI) {
-                        error "ECR_REPO or ECR_URI is not defined. Ensure environment variables are set."
-                        }
-                    powershell '''
-                    # Enable BuildKit for improved performance and compatibility
-                    $env:DOCKER_BUILDKIT="1"
-                    # Build Docker image with platform specification
-                    docker build --platform linux/amd64 -t "$env:ECR_URI`:latest" .
-                    # Verify the build was successful
-                    if ($LASTEXITCODE -ne 0) {
-                    Write-Host "Docker build failed."
-                    exit 1
-                    }
-                    '''
-                    }
-                }
-            }
-        stage('Login to AWS ECR') {
-            steps {
-                script {
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
-                        echo "Logging into AWS ECR..."
-                        powershell '''
-                        $PASSWORD = aws ecr get-login-password --region ap-south-1
-                        $PASSWORD | docker login --username AWS --password-stdin 982534379850.dkr.ecr.ap-south-1.amazonaws.com
-                        '''
-                    }
-                }
+                sh '''
+                # Login to ECR
+                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
+                
+                # Build Docker image
+                docker build -t ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG} .
+                
+                # Push Docker image to ECR
+                docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+                '''
             }
         }
-
-        stage('Ensure ECR Repository Exists') {
+        
+        stage('Update Lambda Function') {
             steps {
-                script {
-                    echo "Checking if ECR repository exists..."
-                    def ecrExists = powershell(returnStatus: true, script: "aws ecr describe-repositories --repository-names ${ECR_REPO} --region ${AWS_REGION}")
-
-                    if (ecrExists != 0) {
-                        echo "ECR repository does not exist. Creating..."
-                        powershell "aws ecr create-repository --repository-name ${ECR_REPO} --region ${AWS_REGION}"
-                    } else {
-                        echo "ECR repository already exists."
-                    }
-                }
+                sh '''
+                # Update Lambda function with new container image
+                aws lambda update-function-code \
+                    --region ${AWS_REGION} \
+                    --function-name ${LAMBDA_FUNCTION_NAME} \
+                    --image-uri ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+                '''
             }
         }
-
-        stage('Tag and Push Docker Image') {
+        
+        stage('Test Lambda Function') {
             steps {
-                script {
-                    echo "Tagging Docker image..."
-                    powershell "docker tag ${ECR_REPO}:latest ${ECR_URI}:latest"
-
-                    echo "Pushing Docker image to ECR..."
-                    powershell "docker push ${ECR_URI}:latest"
+                sh '''
+                # Create test event file
+                cat > test-event.json << EOL
+                {
+                    "s3_bucket": "$(terraform output -raw s3_bucket_name)",
+                    "s3_key": "test-data.csv"
                 }
+                EOL
+                
+                # Invoke Lambda function with test event
+                aws lambda invoke \
+                    --region ${AWS_REGION} \
+                    --function-name ${LAMBDA_FUNCTION_NAME} \
+                    --payload file://test-event.json \
+                    --cli-binary-format raw-in-base64-out \
+                    lambda-response.json
+                
+                # Print the Lambda response
+                cat lambda-response.json
+                '''
             }
         }
-
-        stage('Deploy to AWS Lambda') {
-            steps {
-                script {
-                    
-                    echo "Updating AWS Lambda function..."
-                    powershell "aws lambda update-function-code --function-name ${LAMBDA_FUNCTION} --image-uri ${ECR_URI}:latest"
-                }
-            }
+    }
+    
+    post {
+        always {
+            // Clean up
+            sh 'rm -f test-event.json lambda-response.json'
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
