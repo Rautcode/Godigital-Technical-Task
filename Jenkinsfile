@@ -22,10 +22,14 @@ pipeline {
         }
         
         stage('Terraform Plan') {
-            steps {
-                powershell 'terraform plan -out=tfplan'
-            }
-        }
+    steps {
+        powershell '''
+        $env:AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
+        $env:AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
+        terraform plan -out=tfplan
+        '''
+    }
+}
         
         stage('Terraform Apply') {
             steps {
