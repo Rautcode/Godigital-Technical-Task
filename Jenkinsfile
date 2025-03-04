@@ -27,14 +27,18 @@ pipeline {
             steps {
                 script {
                     echo "Building Docker image with Docker v2 format..."
+                    // Ensure ECR_REPO and ECR_URI are correctly set
+                    if (!env.ECR_REPO || !env.ECR_URI) {
+                        error "ECR_REPO or ECR_URI is not defined! Check your environment variables."
+                        }
                     powershell '''
-                    # Disable BuildKit to prevent OCI format
-                    $env:DOCKER_BUILDKIT=0
-                    $env:DOCKER_CLI_EXPERIMENTAL="enabled"
-                    # Build Docker image using the traditional v2 format
-                    docker build --platform linux/amd64 -t ${ECR_REPO}:latest .
-                    # Tag the image before pushing to ECR
-                    docker tag ${ECR_REPO}:latest ${ECR_URI}:latest
+                    # Remove DOCKER_BUILDKIT=0 (BuildKit is required in newer Docker versions)
+                    $env:DOCKER_BUILDKIT=1
+                    # Debugging: Show Docker version and verify variables
+                    docker --version
+                    echo "ECR_REPO=${ECR_REPO}, ECR_URI=${ECR_URI}"
+                    # Build Docker image with Docker v2 format
+                    docker build --platform linux/amd64 -t ${ECR_URI}:latest .
                     '''
                     }
                 }
