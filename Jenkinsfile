@@ -53,23 +53,26 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    wsl skopeo copy oci-archive:oci-image.tar docker-archive:docker-image.tar
+                    # Run Skopeo inside a Docker container to convert OCI to Docker V2 format
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v "$(pwd):/workspace" quay.io/skopeo/stable:latest \
+                        copy --format v2s2 oci-archive:/workspace/oci-image.tar docker-daemon:my-docker-image:latest
                     '''
-                    }
                 }
             }
+        }
         
         stage('Push Docker Image to AWS ECR') {
             steps {
                 sh '''
                 # Extract the repository name from the URL
                 REPO_NAME=$(echo ${ECR_REPOSITORY_URL} | awk -F'/' '{print $NF}')
-                
-                # Login to ECR
+
+                # Login to AWS ECR
                 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
                 
-                # Tag and push Docker image to ECR
-                docker tag ${REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+                # Tag and push Docker image to AWS ECR
+                docker tag my-docker-image:latest ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
@@ -78,7 +81,7 @@ pipeline {
         stage('Update Lambda Function') {
             steps {
                 sh '''
-                # Update Lambda function with new container image
+                # Update AWS Lambda function to use the new image from ECR
                 aws lambda update-function-code \
                     --region ${AWS_REGION} \
                     --function-name ${LAMBDA_FUNCTION_NAME} \
@@ -90,7 +93,7 @@ pipeline {
         stage('Test Lambda Function') {
             steps {
                 sh '''
-                # Create test event file
+                # Create test event JSON file
                 cat > test-event.json << EOL
                 {
                     "s3_bucket": "${S3_BUCKET_NAME}",
@@ -106,7 +109,7 @@ pipeline {
                     --cli-binary-format raw-in-base64-out \
                     lambda-response.json
                 
-                # Print the Lambda response
+                # Print Lambda response
                 cat lambda-response.json
                 '''
             }
