@@ -123,19 +123,15 @@ pipeline {
 
     post {
         always {
-            script {
-                echo 'Cleaning up temporary files...'
+            node {
+                sh 'rm -f test-event.json lambda-response.json || true'
+                }
             }
-            sh 'rm -f test-event.json lambda-response.json'
-        }
         success {
-            script {
-                echo 'Jenkins Pipeline completed successfully!'
+            echo 'Jenkins Pipeline completed successfully!'
             }
-        }
         failure {
-            script {
-                echo 'Jenkins Pipeline failed! Check logs for details.'
+            echo 'Jenkins Pipeline failed! Check logs for details.'
             }
         }
     }
