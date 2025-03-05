@@ -8,16 +8,14 @@ pipeline {
         ECR_REPOSITORY_URL = "982534379850.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPO_NAME}"
         LAMBDA_FUNCTION_NAME = 'data-pipeline-lambda'
         S3_BUCKET_NAME = 'data-pipeline-bucket'
-
-        // Fetch AWS credentials from Jenkins credentials store
         AWS_ACCESS_KEY_ID = credentials('aws-access-key')
         AWS_SECRET_ACCESS_KEY = credentials('aws-secret-key')
 
-        // Pass AWS credentials to Terraform
+       
         TF_VAR_aws_access_key = credentials('aws-access-key')
         TF_VAR_aws_secret_key = credentials('aws-secret-key')
 
-        // RDS password
+        
         TF_VAR_rds_password = credentials('rds-password')
     }
 
@@ -144,10 +142,10 @@ pipeline {
             sh 'rm -f test-event.json lambda-response.json || true'
         }
         success {
-            echo "✅ Jenkins Pipeline completed successfully!"
+            echo " Jenkins Pipeline completed successfully!"
         }
         failure {
-            echo "❌ Jenkins Pipeline failed! Check logs for details."
+            echo " Jenkins Pipeline failed! Check logs for details."
         }
     }
 }
