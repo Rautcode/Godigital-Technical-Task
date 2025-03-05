@@ -1,12 +1,10 @@
 #!/bin/bash
 
-# Ensure AWS CLI is configured
 if ! aws sts get-caller-identity &> /dev/null; then
     echo "AWS CLI is not configured. Please run 'aws configure'."
     exit 1
 fi
 
-# Get outputs from Terraform
 S3_BUCKET=$(terraform output -raw s3_bucket_name)
 LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name)
 AWS_REGION=$(aws configure get region)
