@@ -5,8 +5,11 @@ pipeline {
         AWS_REGION = 'us-east-1'
         ECR_REPO_NAME = 'data-pipeline-repo'
         DOCKER_IMAGE_TAG = 'latest'
+        ECR_REPOSITORY_URL = "982534379850.dkr.ecr.us-east-1.amazonaws.com/${ECR_REPO_NAME}"
+        LAMBDA_FUNCTION_NAME = 'data-pipeline-lambda'
+        S3_BUCKET_NAME = 'data-pipeline-bucket'
 
-        // Fetch AWS credentials from Jenkins credential store
+        // Fetch AWS credentials from Jenkins credentials store
         AWS_ACCESS_KEY_ID = credentials('aws-access-key')
         AWS_SECRET_ACCESS_KEY = credentials('aws-secret-key')
 
@@ -21,15 +24,28 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                checkout scm
+                git branch: 'main', url: 'https://github.com/Rautcode/Godigital-Technical-Task.git'
+            }
+        }
+
+        stage('Setup AWS Credentials') {
+            steps {
+                sh '''
+                echo "Configuring AWS CLI..."
+                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+                aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+                aws configure set region ${AWS_REGION}
+                aws s3 ls
+                '''
             }
         }
 
         stage('Terraform Init') {
             steps {
                 sh '''
-                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                echo "Initializing Terraform..."
                 terraform init
                 '''
             }
@@ -39,7 +55,7 @@ pipeline {
             steps {
                 script {
                     def resources = [
-                        ["aws_ecr_repository.ecr_repo", "982534379850.dkr.ecr.us-east-1.amazonaws.com/data-pipeline-repo"],
+                        ["aws_ecr_repository.ecr_repo", "${ECR_REPOSITORY_URL}"],
                         ["aws_iam_role.lambda_role", "lambda_execution_role"],
                         ["aws_glue_catalog_database.glue_db", "datapipeline"],
                         ["aws_db_subnet_group.rds_subnet_group", "data-pipeline-subnet-group"]
@@ -50,8 +66,6 @@ pipeline {
                         def exists = sh(script: "terraform state list | grep ${resource}", returnStatus: true)
                         if (exists != 0) {
                             sh '''
-                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             terraform import ${resource} ${id}
                             '''
                         }
@@ -63,9 +77,10 @@ pipeline {
         stage('Terraform Plan & Apply') {
             steps {
                 sh '''
-                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                echo "Running Terraform Plan..."
                 terraform plan -out=tfplan
+
+                echo "Applying Terraform Changes..."
                 terraform apply -auto-approve tfplan
                 '''
             }
@@ -74,10 +89,12 @@ pipeline {
         stage('Push Docker Image to AWS ECR') {
             steps {
                 sh '''
-                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                echo "Logging into AWS ECR..."
                 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
-                docker tag my-docker-image:latest ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
+
+                echo "Building and pushing Docker image..."
+                docker build -t ${ECR_REPO_NAME}:latest .
+                docker tag ${ECR_REPO_NAME}:latest ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
@@ -86,8 +103,7 @@ pipeline {
         stage('Update Lambda Function') {
             steps {
                 sh '''
-                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                echo "Updating AWS Lambda function..."
                 aws lambda update-function-code \
                 --region ${AWS_REGION} \
                 --function-name ${LAMBDA_FUNCTION_NAME} \
@@ -99,8 +115,7 @@ pipeline {
         stage('Invoke & Test AWS Lambda') {
             steps {
                 sh '''
-                export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                echo "Creating test event for Lambda..."
                 cat > test-event.json << EOL
                 {
                     "s3_bucket": "${S3_BUCKET_NAME}",
@@ -108,6 +123,7 @@ pipeline {
                 }
                 EOL
 
+                echo "Invoking Lambda function..."
                 aws lambda invoke \
                 --region ${AWS_REGION} \
                 --function-name ${LAMBDA_FUNCTION_NAME} \
@@ -115,6 +131,7 @@ pipeline {
                 --cli-binary-format raw-in-base64-out \
                 lambda-response.json
 
+                echo "Lambda Response:"
                 cat lambda-response.json
                 '''
             }
@@ -122,15 +139,15 @@ pipeline {
     }
 
     post {
-    always {
-        node {
+        always {
+            echo "Cleaning up temporary files..."
             sh 'rm -f test-event.json lambda-response.json || true'
         }
-    }
-    success {
-        echo 'Jenkins Pipeline completed successfully!'
-    }
-    failure {
-        echo 'Jenkins Pipeline failed! Check logs for details.'
+        success {
+            echo "✅ Jenkins Pipeline completed successfully!"
+        }
+        failure {
+            echo "❌ Jenkins Pipeline failed! Check logs for details."
+        }
     }
 }
