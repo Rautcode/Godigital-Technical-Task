@@ -100,4 +100,36 @@ pipeline {
             steps {
                 sh '''
                 export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-               
+                export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                cat > test-event.json << EOL
+                {
+                    "s3_bucket": "${S3_BUCKET_NAME}",
+                    "s3_key": "test-data.csv"
+                }
+                EOL
+
+                aws lambda invoke \
+                --region ${AWS_REGION} \
+                --function-name ${LAMBDA_FUNCTION_NAME} \
+                --payload file://test-event.json \
+                --cli-binary-format raw-in-base64-out \
+                lambda-response.json
+
+                cat lambda-response.json
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'rm -f test-event.json lambda-response.json || true'
+        }
+        success {
+            echo 'Jenkins Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Jenkins Pipeline failed! Check logs for details.'
+        }
+    }
+}
