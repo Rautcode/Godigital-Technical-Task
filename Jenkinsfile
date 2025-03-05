@@ -122,14 +122,15 @@ pipeline {
     }
 
     post {
-        always {
+    always {
+        node {
             sh 'rm -f test-event.json lambda-response.json || true'
         }
-        success {
-            echo 'Jenkins Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Jenkins Pipeline failed! Check logs for details.'
-        }
+    }
+    success {
+        echo 'Jenkins Pipeline completed successfully!'
+    }
+    failure {
+        echo 'Jenkins Pipeline failed! Check logs for details.'
     }
 }
