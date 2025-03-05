@@ -11,97 +11,69 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                script {
-                    echo 'Checking out source code...'
-                }
                 checkout scm
             }
         }
 
-        stage('Verify Dependencies') {
+        stage('Terraform Init') {
             steps {
-                script {
-                    echo 'Verifying Terraform, AWS CLI, and Docker installation...'
-                }
-                sh '''
-                terraform -version || { echo "ERROR: Terraform is not installed!"; exit 1; }
-                aws --version || { echo "ERROR: AWS CLI is not installed!"; exit 1; }
-                docker --version || { echo "ERROR: Docker is not installed!"; exit 1; }
-                '''
+                sh 'terraform init'
             }
         }
 
-        stage('Terraform Init & Apply') {
+        stage('Check & Import Existing Resources') {
             steps {
                 script {
-                    echo 'Initializing and applying Terraform configuration...'
-                }
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-                    sh '''
-                    export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                    export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                    def resources = [
+                        ["aws_ecr_repository.ecr_repo", "982534379850.dkr.ecr.us-east-1.amazonaws.com/data-pipeline-repo"],
+                        ["aws_iam_role.lambda_role", "lambda_execution_role"],
+                        ["aws_glue_catalog_database.glue_db", "datapipeline"],
+                        ["aws_db_subnet_group.rds_subnet_group", "data-pipeline-subnet-group"]
+                    ]
 
-                    terraform init
-                    terraform plan -out=tfplan
-                    terraform apply -auto-approve tfplan
-                    '''
-
-                    script {
-                        echo 'Fetching Terraform outputs...'
-                        def ecr_output = sh(script: 'terraform output -raw ecr_repository_url || echo "ERROR"', returnStdout: true).trim()
-                        def lambda_output = sh(script: 'terraform output -raw lambda_function_name || echo "ERROR"', returnStdout: true).trim()
-                        def s3_output = sh(script: 'terraform output -raw s3_bucket_name || echo "ERROR"', returnStdout: true).trim()
-
-                        if (ecr_output == "ERROR" || lambda_output == "ERROR" || s3_output == "ERROR") {
-                            error "ERROR: Terraform outputs could not be retrieved!"
+                    for (res in resources) {
+                        def (resource, id) = res
+                        def exists = sh(script: "terraform state list | grep ${resource}", returnStatus: true)
+                        if (exists != 0) {
+                            sh "terraform import ${resource} ${id}"
                         }
-
-                        env.ECR_REPOSITORY_URL = ecr_output
-                        env.LAMBDA_FUNCTION_NAME = lambda_output
-                        env.S3_BUCKET_NAME = s3_output
                     }
                 }
             }
         }
+
+        stage('Terraform Plan & Apply') {
+            steps {
+                sh '''
+                terraform plan -out=tfplan
+                terraform apply -auto-approve tfplan
+                '''
+            }
+        }
+
         stage('Push Docker Image to AWS ECR') {
             steps {
-                script {
-                    echo 'Logging into AWS ECR and pushing Docker image...'
-                }
                 sh '''
                 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URL}
-
-                echo "Tagging Docker image..."
                 docker tag my-docker-image:latest ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
-
-                echo "Pushing Docker image to AWS ECR..."
                 docker push ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
         }
 
-        stage('Update AWS Lambda with New Image') {
+        stage('Update Lambda Function') {
             steps {
-                script {
-                    echo 'Updating AWS Lambda function with new image...'
-                }
                 sh '''
                 aws lambda update-function-code \
                 --region ${AWS_REGION} \
                 --function-name ${LAMBDA_FUNCTION_NAME} \
-                --image-uri ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG} || { echo "ERROR: Lambda update failed!"; exit 1; }
-
-                echo "Waiting for Lambda to sync new image..."
-                sleep 10
+                --image-uri ${ECR_REPOSITORY_URL}:${DOCKER_IMAGE_TAG}
                 '''
             }
         }
 
         stage('Invoke & Test AWS Lambda') {
             steps {
-                script {
-                    echo 'Invoking AWS Lambda function for testing...'
-                }
                 sh '''
                 cat > test-event.json << EOL
                 {
@@ -110,34 +82,28 @@ pipeline {
                 }
                 EOL
 
-                echo "Running AWS Lambda function test..."
                 aws lambda invoke \
                 --region ${AWS_REGION} \
                 --function-name ${LAMBDA_FUNCTION_NAME} \
                 --payload file://test-event.json \
                 --cli-binary-format raw-in-base64-out \
-                lambda-response.json || { echo "ERROR: Lambda invocation failed!"; exit 1; }
+                lambda-response.json
 
-                echo "Lambda function executed successfully. Response:"
                 cat lambda-response.json
                 '''
             }
         }
     }
 
-   post {
+    post {
         always {
             sh 'rm -f test-event.json lambda-response.json || true'
         }
         success {
-            script {
-                echo 'Jenkins Pipeline completed successfully!'
-            }
+            echo 'Jenkins Pipeline completed successfully!'
         }
         failure {
-            script {
-                echo 'Jenkins Pipeline failed! Check logs for details.'
-            }
+            echo 'Jenkins Pipeline failed! Check logs for details.'
         }
     }
 }
