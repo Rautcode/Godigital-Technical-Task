@@ -5,11 +5,11 @@ import sqlalchemy
 import logging
 from botocore.exceptions import ClientError
 
-# Configure logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get environment variables
+
 S3_BUCKET = os.environ.get('S3_BUCKET')
 S3_KEY = os.environ.get('S3_KEY')
 RDS_HOST = os.environ.get('RDS_HOST')
@@ -26,8 +26,6 @@ def read_from_s3(bucket, key):
         logger.info(f"Reading data from s3://{bucket}/{key}")
         s3_client = boto3.client('s3')
         response = s3_client.get_object(Bucket=bucket, Key=key)
-        
-        # Determine file type and read accordingly
         if key.endswith('.csv'):
             df = pd.read_csv(response['Body'])
         elif key.endswith('.json'):
@@ -50,7 +48,7 @@ def write_to_rds(df, table_name):
         connection_string = f"postgresql://{RDS_USER}:{RDS_PASSWORD}@{RDS_HOST}:{RDS_PORT}/{RDS_DB}"
         engine = sqlalchemy.create_engine(connection_string)
         
-        # Write dataframe to PostgreSQL
+        
         df.to_sql(table_name, engine, if_exists='append', index=False)
         logger.info(f"Successfully wrote data to RDS table {table_name}")
         return True
@@ -65,21 +63,15 @@ def write_to_glue(df, database, table):
         # Create a temporary parquet file
         temp_file = '/tmp/data.parquet'
         df.to_parquet(temp_file)
-        
-        # Upload to S3
         s3_client = boto3.client('s3')
         target_path = f"s3://{S3_BUCKET}/glue-data/{database}/{table}/data.parquet"
         bucket, key = target_path.replace("s3://", "").split("/", 1)
         s3_client.upload_file(temp_file, bucket, key)
-        
-        # Update Glue table
         glue_client = boto3.client('glue')
         
         try:
-            # Check if table exists
             glue_client.get_table(DatabaseName=database, Name=table)
         except ClientError:
-            # Create table if it doesn't exist
             columns = []
             for column, dtype in df.dtypes.items():
                 col_type = 'string'
@@ -118,18 +110,11 @@ def write_to_glue(df, database, table):
 def lambda_handler(event, context):
     """AWS Lambda entry point"""
     try:
-        # If event contains S3 information, use that; otherwise use environment variables
         bucket = event.get('s3_bucket', S3_BUCKET)
         key = event.get('s3_key', S3_KEY)
-        
-        # Read data from S3
         df = read_from_s3(bucket, key)
-        
-        # Try to write to RDS first
         table_name = os.path.splitext(os.path.basename(key))[0]
         rds_success = write_to_rds(df, table_name)
-        
-        # If RDS fails, write to Glue
         if not rds_success:
             logger.info("RDS write failed, falling back to Glue")
             glue_success = write_to_glue(df, GLUE_DB, table_name)
@@ -156,7 +141,6 @@ def lambda_handler(event, context):
             'body': f'Error: {str(e)}'
         }
 
-# For local testing
 if __name__ == "__main__":
     # Simulate Lambda event
     test_event = {
