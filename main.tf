@@ -4,7 +4,6 @@ provider "aws" {
   secret_key = var.aws_secret_key
 }
 
-# S3 bucket for data storage
 resource "aws_s3_bucket" "data_bucket" {
   bucket = var.s3_bucket_name
 }
@@ -14,7 +13,6 @@ resource "aws_s3_bucket_acl" "data_bucket_acl" {
   acl    = "private"
 }
 
-# VPC for RDS
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
   
@@ -38,21 +36,15 @@ resource "aws_db_instance" "postgres" {
   }
 }
 
-# AWS Glue database
 resource "aws_glue_catalog_database" "glue_db" {
   name = var.glue_db_name
 }
-
-# ECR repository for Docker image
 resource "aws_ecr_repository" "ecr_repo" {
   name                 = var.ecr_repo_name
   image_tag_mutability = "MUTABLE"
 }
-
-# Get the current AWS account ID
 data "aws_caller_identity" "current" {}
 
-# Output values
 output "lambda_function_name" {
   value = aws_lambda_function.data_pipeline_lambda.function_name
 }
