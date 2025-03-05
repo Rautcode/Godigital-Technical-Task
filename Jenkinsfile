@@ -36,29 +36,33 @@ pipeline {
                 script {
                     echo 'Initializing and applying Terraform configuration...'
                 }
-                sh '''
-                terraform init
-                terraform plan -out=tfplan
-                terraform apply -auto-approve tfplan
-                '''
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    sh '''
+                    export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                    export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 
-                script {
-                    echo 'Fetching Terraform outputs...'
-                    def ecr_output = sh(script: 'terraform output -raw ecr_repository_url || echo "ERROR"', returnStdout: true).trim()
-                    def lambda_output = sh(script: 'terraform output -raw lambda_function_name || echo "ERROR"', returnStdout: true).trim()
-                    def s3_output = sh(script: 'terraform output -raw s3_bucket_name || echo "ERROR"', returnStdout: true).trim()
+                    terraform init
+                    terraform plan -out=tfplan
+                    terraform apply -auto-approve tfplan
+                    '''
 
-                    if (ecr_output == "ERROR" || lambda_output == "ERROR" || s3_output == "ERROR") {
-                        error "ERROR: Terraform outputs could not be retrieved!"
+                    script {
+                        echo 'Fetching Terraform outputs...'
+                        def ecr_output = sh(script: 'terraform output -raw ecr_repository_url || echo "ERROR"', returnStdout: true).trim()
+                        def lambda_output = sh(script: 'terraform output -raw lambda_function_name || echo "ERROR"', returnStdout: true).trim()
+                        def s3_output = sh(script: 'terraform output -raw s3_bucket_name || echo "ERROR"', returnStdout: true).trim()
+
+                        if (ecr_output == "ERROR" || lambda_output == "ERROR" || s3_output == "ERROR") {
+                            error "ERROR: Terraform outputs could not be retrieved!"
+                        }
+
+                        env.ECR_REPOSITORY_URL = ecr_output
+                        env.LAMBDA_FUNCTION_NAME = lambda_output
+                        env.S3_BUCKET_NAME = s3_output
                     }
-
-                    env.ECR_REPOSITORY_URL = ecr_output
-                    env.LAMBDA_FUNCTION_NAME = lambda_output
-                    env.S3_BUCKET_NAME = s3_output
                 }
             }
         }
-
         stage('Push Docker Image to AWS ECR') {
             steps {
                 script {
