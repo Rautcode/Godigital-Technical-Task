@@ -2,32 +2,20 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Ensure the S3 bucket exists before creating a new one
-data "aws_s3_bucket" "existing_bucket" {
-  bucket = var.s3_bucket_name
-  count  = length(try([aws_s3_bucket.data_bucket[0].id], [])) == 0 ? 1 : 0
-}
-
 resource "random_string" "suffix" {
   length  = 6
   special = false
   upper   = false
 }
 
+# Create a new S3 bucket with a unique name
 resource "aws_s3_bucket" "data_bucket" {
-  count  = length(try([data.aws_s3_bucket.existing_bucket[0].id], [])) == 0 ? 1 : 0
-  bucket = "${var.s3_bucket_name}-${random_string.suffix.result}"
+  bucket = "${var.s3_bucket_name}-${random_string.suffix.result}" # Ensures uniqueness
 }
 
 # Ensure the RDS subnet group exists before creating a new one
-data "aws_db_subnet_group" "existing_rds_subnet_group" {
-  name  = "data-pipeline-subnet-group"
-  count = length(try([aws_db_subnet_group.rds_subnet_group[0].id], [])) == 0 ? 1 : 0
-}
-
 resource "aws_db_subnet_group" "rds_subnet_group" {
-  count      = length(try([data.aws_db_subnet_group.existing_rds_subnet_group[0].id], [])) == 0 ? 1 : 0
-  name       = "data-pipeline-subnet-group"
+  name       = "data-pipeline-subnet-group-${random_string.suffix.result}" # Ensures uniqueness
   subnet_ids = ["subnet-028121377f9e02a1d", "subnet-02b05146f9d302061"]  # Using correct subnets from AWS
 
   tags = {
