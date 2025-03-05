@@ -1,16 +1,14 @@
 provider "aws" {
   region = var.aws_region
 }
-resource "random_string" "suffix" {
-  length  = 6
-  special = false
-  upper   = false
+data "aws_s3_bucket" "existing_bucket" {
+  bucket = var.s3_bucket_name
 }
 
-# S3 bucket for data storage with unique name
 resource "aws_s3_bucket" "data_bucket" {
-  bucket = "${var.s3_bucket_name}-${random_string.suffix.result}"
+  bucket = coalesce(data.aws_s3_bucket.existing_bucket.id, "${var.s3_bucket_name}-${random_string.suffix.result}")
 }
+
 
 resource "aws_s3_bucket_ownership_controls" "data_bucket_ownership" {
   bucket = aws_s3_bucket.data_bucket.id
